@@ -36,21 +36,8 @@ class LocalAiEngine(
 
     suspend fun answer(userText: String, imageUris: List<Uri>, mode: String, chatId: String): String {
         val modelName = models.activeModel()?.displayName ?: "no model"
-        // 1) Real vision-language turn on-device — but ONLY with a photo to look at.
-        //    A vision model with no image just confabulates, so imageless questions
-        //    go straight to the text reader / "send a photo" reply below.
         val hasImage = imageUris.isNotEmpty()
-        if (LlamaBridge.nativeLoaded && hasImage) {
-            val localPath = copyToCache(imageUris.firstOrNull())
-            val prompt = nativePrompt(userText, mode, localPath != null)
-            LlamaBridge.generate(prompt, localPath)?.let {
-                // Parroted question or runaway loop? Fall through to the text reader instead.
-                if (!isEcho(it, userText) && !isDegenerate(it)) {
-                    return it + "\n\n— $modelName (on-device)"
-                }
-            }
-        }
-        // 2) OCR + rules — works today, fully offline
+        // Read the text first — it grounds the vision model and powers the fallback.
         val fresh = imageUris.map { ocr(it) }.joinToString("\n---\n")
         if (fresh.isNotBlank()) {
             val prev = ocrMemory[chatId].orEmpty()
@@ -58,7 +45,32 @@ class LocalAiEngine(
             if (ocrMemory.size > 30) ocrMemory.remove(ocrMemory.keys.first())
         }
         val ocr = (if (fresh.isNotBlank()) fresh else ocrMemory[chatId].orEmpty()).take(6000)
-        if (ocr.isBlank()) return needPhoto(userText, modelName)
+        // 1) Real vision-language turn on-device — but ONLY with a photo to look at.
+        //    A vision model with no image just confabulates, so imageless questions
+        //    go straight to the text reader / "send a photo" reply below.
+        if (LlamaBridge.nativeLoaded && hasImage) {
+            val localPath = copyToCache(imageUris.firstOrNull())
+            val prompt = nativePrompt(userText, mode, ocr.take(1500))
+            LlamaBridge.generate(prompt, localPath)?.let {
+                // Docs have a strong deterministic fallback, so demand substance there:
+                // tiny models sometimes quit after 3 words ("When? ANSWER: When.").
+                val substantive = mode == "general" || wordCount(it) >= 10
+                // Parroted question or runaway loop? Fall through to the text reader instead.
+                if (!isEcho(it, userText) && !isDegenerate(it) && substantive) {
+                    return it + "\n\n— $modelName (on-device)"
+                }
+            }
+        }
+        // 2) OCR + rules fallback — deterministic, and excellent at bills/forms.
+        if (ocr.isBlank()) {
+            return if (hasImage) {
+                "I couldn't read this photo clearly — try a sharper, straight-on shot with good light, then ask again." +
+                    if (mode == "general") " If it's a landmark or object, get closer first." else "" +
+                    "\n\n— on-device ($modelName)."
+            } else {
+                needPhoto(userText, modelName)
+            }
+        }
         // Question about the picture -> answer it directly instead of the full template.
         if (userText.isNotBlank() && (fresh.isBlank() || looksLikeQuestion(userText))) {
             if (wantsSummary(userText)) return analyze(userText, ocr, mode, modelName)
@@ -79,22 +91,30 @@ class LocalAiEngine(
         } catch (_: Exception) { null }
     }
 
-    private fun nativePrompt(userText: String, mode: String, hasImage: Boolean): String {
+    private fun nativePrompt(userText: String, mode: String, ocrText: String): String {
+        val ground = if (ocrText.isNotBlank()) {
+            " The photo's text reads (may be imperfect): \"\"\"$ocrText\"\"\". Use these exact amounts, dates and names."
+        } else ""
         val instruction = "If the image shows a question, homework, or any text asking something, " +
             "ANSWER it directly using what you see. Never reply by repeating the question or the prompt. "
         if (userText.isBlank()) {
-            return instruction + if (mode == "scan") "Describe this document in detail: what is it, what must be done, and by when?"
-            else "Describe this image in detail."
+            return instruction + if (mode == "scan") {
+                "Describe this document in this exact shape:$ground\nWHAT IT IS: one line. WHAT TO DO: numbered steps. BY WHEN: the deadline."
+            } else "Describe this image in detail.$ground"
         }
         return when (mode) {
             "scan" -> "You are ClearKit, an offline paperwork helper. $instruction" +
-                "Look at the image and answer concisely: $userText"
-            "med" -> "You are ClearKit. $instruction" + "Answer simply and briefly: $userText"
+                "Look at the image and answer in this exact shape:$ground\n" +
+                "WHAT IT IS: one line. WHAT TO DO: numbered steps with the amounts, dates and names. " +
+                "BY WHEN: the deadline. Question: $userText"
+            "med" -> "You are ClearKit. $instruction" + "Answer simply and briefly$ground: $userText"
             "proof" -> "You are ClearKit. $instruction" +
-                "Answer briefly, noting item condition and visible details: $userText"
-            else -> instruction + userText
+                "Answer briefly, noting item condition and visible details$ground: $userText"
+            else -> instruction + userText + ground
         }
     }
+
+    private fun wordCount(t: String): Int = t.split(Regex("\\s+")).count { it.isNotEmpty() }
 
     /** The tiny on-device models sometimes just parrot the question — catch that and use the reader instead. */
     private fun isEcho(response: String, question: String): Boolean {
