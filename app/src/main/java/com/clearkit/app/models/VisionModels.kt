@@ -35,20 +35,20 @@ val BUILTIN_VISION_MODELS = listOf(
     ),
     VisionModel(
         id = "moondream2-20250414",
-        displayName = "Moondream 2 (F16) — balanced",
+        displayName = "Moondream 2 (F16) — experimental",
         hfRepo = "ggml-org/moondream2-20250414-GGUF",
         hfFile = "moondream2-text-model-f16_ct-vicuna.gguf",
         hfMmProj = "moondream2-mmproj-f16-20250414.gguf",
         sizeMbApprox = 2800,
-        description = "Strong small vision model. Great at letters, handwriting, photos of documents. Needs ~4 GB free."
+        description = "EXPERIMENTAL: strong small vision model, but ~2.8 GB. Likely OOM on most phones — try only with 6+ GB free RAM."
     ),
     VisionModel(
         id = "qwen2-vl-2b-q4",
-        displayName = "Qwen2-VL 2B (Q4) — most capable",
+        displayName = "Qwen2-VL 2B (Q4) — experimental",
         hfRepo = "bartowski/Qwen2-VL-2B-Instruct-GGUF",
         hfFile = "Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
         hfMmProj = "mmproj-Qwen2-VL-2B-Instruct-f16.gguf",
         sizeMbApprox = 1700,
-        description = "Best understanding, slower + more RAM (~3 GB free needed)."
+        description = "EXPERIMENTAL: best understanding, but needs ~3 GB free RAM and is slow on CPU. SmolVLM is the safe default."
     )
 )

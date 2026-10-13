@@ -2,8 +2,15 @@
 cmake_minimum_required(VERSION 3.22)
 project(clearkit_llama CXX C)
 
-set(LLAMA_CPP_SRC "C:/Users/Nikolas/AppData/Local/Temp/opencode/llama-src/llama.cpp-0.6.0"
-    CACHE PATH "llama.cpp source directory")
+set(LLAMA_CPP_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/llama.cpp"
+    CACHE PATH "llama.cpp source directory (override with -DLLAMA_CPP_SRC=...)")
+
+if (NOT EXISTS "${LLAMA_CPP_SRC}/include/llama.h")
+    message(FATAL_ERROR
+        "llama.cpp not found at ${LLAMA_CPP_SRC}. "
+        "Clone with submodules: git clone --recurse-submodules <url> "
+        "or run: git submodule update --init --depth 1 third_party/llama.cpp")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -19,7 +19,7 @@ android {
         externalNativeBuild {
             cmake {
                 abiFilters += "arm64-v8a"
-                arguments += "-DCMAKE_MAKE_PROGRAM=C:/Users/Nikolas/AppData/Local/Temp/opencode/ninja.exe"
+                // Ninja comes with the SDK CMake package; no override needed.
                 arguments += "-DCMAKE_BUILD_TYPE=Release"
             }
         }

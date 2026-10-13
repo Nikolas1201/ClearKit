@@ -119,7 +119,7 @@ fun ModelsScreen(mm: ModelManager, onBack: () -> Unit, onBrowse: () -> Unit) {
                 loadError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                 }
-                Text("Tip: SmolVLM for old phones, Moondream 2 for most people, Qwen2-VL for best reading (needs ~3 GB free RAM). Wi-Fi recommended.",
+                Text("Tip: start with SmolVLM (fast, small). Moondream 2 and Qwen2-VL are marked experimental — they need lots of free RAM and may fail to load. Wi-Fi recommended for downloads.",
                     style = MaterialTheme.typography.bodySmall)
             }
         }
