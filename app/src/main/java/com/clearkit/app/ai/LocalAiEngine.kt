@@ -36,14 +36,18 @@ class LocalAiEngine(
 
     suspend fun answer(userText: String, imageUris: List<Uri>, mode: String, chatId: String): String {
         val modelName = models.activeModel()?.displayName ?: "no model"
-        // 1) Real vision-language turn on-device (any photo, any question).
-        //    Falls through to the OCR engine below if the native call fails.
-        if (LlamaBridge.nativeLoaded) {
+        // 1) Real vision-language turn on-device — but ONLY with a photo to look at.
+        //    A vision model with no image just confabulates, so imageless questions
+        //    go straight to the text reader / "send a photo" reply below.
+        val hasImage = imageUris.isNotEmpty()
+        if (LlamaBridge.nativeLoaded && hasImage) {
             val localPath = copyToCache(imageUris.firstOrNull())
             val prompt = nativePrompt(userText, mode, localPath != null)
             LlamaBridge.generate(prompt, localPath)?.let {
-                // Parroted question? Fall through to the text reader instead.
-                if (!isEcho(it, userText)) return it + "\n\n— $modelName (on-device)"
+                // Parroted question or runaway loop? Fall through to the text reader instead.
+                if (!isEcho(it, userText) && !isDegenerate(it)) {
+                    return it + "\n\n— $modelName (on-device)"
+                }
             }
         }
         // 2) OCR + rules — works today, fully offline
@@ -311,6 +315,22 @@ class LocalAiEngine(
         if (refs.isNotEmpty()) sb.appendLine("References: " + refs.joinToString(", "))
         if (sb.isEmpty()) sb.appendLine("(no amounts, dates, or reference numbers recognized)")
         return sb.toString().trim()
+    }
+
+    /** Catches runaway loops the sampler penalty didn't stop. */
+    private fun isDegenerate(response: String): Boolean {
+        val words = response.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.size < 60) return false
+        val seen = HashSet<String>()
+        var repeats = 0
+        for (i in 0..words.size - 6) {
+            val gram = words.subList(i, i + 6).joinToString(" ")
+            if (!seen.add(gram)) {
+                repeats++
+                if (repeats >= 5) return true
+            }
+        }
+        return false
     }
 
     private fun matchingLines(lines: List<String>, needles: List<String>): List<String> {

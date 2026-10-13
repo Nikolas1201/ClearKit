@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.clearkit.app.ClearKitApp
 import com.clearkit.app.data.Chat
 import com.clearkit.app.data.ChatMessage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -104,33 +105,43 @@ class ChatViewModel(private val app: ClearKitApp) : ViewModel() {
     fun send(text: String) {
         val chat = currentChat() ?: return
         if (_generating.value) return
-        if (text.isBlank() && _pendingImages.value.isEmpty()) return
-        viewModelScope.launch {
-            _generating.value = true
+        val attached = _pendingImages.value
+        if (text.isBlank() && attached.isEmpty()) return
+        // Instant UI: bubble appears and photo leaves the box before any heavy work.
+        _pendingImages.value = emptyList()
+        val userMsg = ChatMessage(role = "user", text = text, imageUris = attached.map { it.toString() })
+        val base = chat.copy(
+            messages = chat.messages + userMsg,
+            title = chat.messages.filter { it.role == "user" }.firstOrNull()?.text?.take(32)
+                ?: text.take(32).ifBlank { if (attached.isNotEmpty()) "Photo chat" else chat.title },
+            updatedAt = System.currentTimeMillis()
+        )
+        _chats.value = _chats.value.map { if (it.id == chat.id) base else it }
+        _generating.value = true
+        // Heavy work (file copies, model inference) OFF the main thread — never freeze the app.
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Persist images first so history survives reboot
-                val persisted = _pendingImages.value.map { runCatching { Uri.parse(store.persistImage(it)) }.getOrNull() ?: it }
-                val userMsg = ChatMessage(role = "user", text = text, imageUris = persisted.map { it.toString() })
-                var updated = chat.copy(
-                    messages = chat.messages + userMsg,
-                    title = chat.messages.filter { it.role == "user" }.firstOrNull()?.text?.take(32)
-                        ?: text.take(32).ifBlank { if (persisted.isNotEmpty()) "Photo chat" else chat.title },
-                    updatedAt = System.currentTimeMillis()
+                // Persist images so history survives reboot, then point the bubble at the copies.
+                val persisted = attached.map { runCatching { Uri.parse(store.persistImage(it)) }.getOrNull() ?: it }
+                val swapped = base.copy(
+                    messages = base.messages.dropLast(1) +
+                        userMsg.copy(imageUris = persisted.map { it.toString() })
                 )
-                _chats.value = _chats.value.map { if (it.id == chat.id) updated else it }
-                _pendingImages.value = emptyList()
-
                 // Follow-ups without a new photo reuse the latest photo in this chat,
                 // so the vision model still sees what the question is about.
-                val priorImage = chat.messages.asReversed()
+                val priorImage = swapped.messages.asReversed()
                     .flatMap { it.imageUris }.firstOrNull()?.let { Uri.parse(it) }
                 val modelImages = if (persisted.isNotEmpty()) persisted else listOfNotNull(priorImage)
                 val reply = engine.answer(text, modelImages, chat.mode, chat.id)
-                updated = updated.copy(messages = updated.messages + ChatMessage(role = "assistant", text = reply))
+                val updated = swapped.copy(
+                    messages = swapped.messages + ChatMessage(role = "assistant", text = reply))
                 _chats.value = _chats.value.map { if (it.id == chat.id) updated else it }
                 store.save(_chats.value)
             } catch (e: Exception) {
-                val err = chat.copy(messages = chat.messages + ChatMessage(role = "assistant", text = "Something went wrong offline: ${e.message}"))
+                val current = _chats.value.firstOrNull { it.id == chat.id } ?: base
+                val err = current.copy(
+                    messages = current.messages +
+                        ChatMessage(role = "assistant", text = "Something went wrong offline: ${e.message}"))
                 _chats.value = _chats.value.map { if (it.id == chat.id) err else it }
             } finally {
                 _generating.value = false
