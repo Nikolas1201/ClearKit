@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+app/.cxx
+app/build/
+
+# Signing / secrets
+*.jks
+*.keystore
+
+# Generated test docs (regenerate with make_test_docs.py)
+test-bill.png
+test-appointment.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep the wrapper so others can build
+!gradle/wrapper/gradle-wrapper.jar
